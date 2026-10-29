@@ -6,7 +6,7 @@
 - **Data:** `X_train.csv` (1212 rows), `y_train.csv`, `X_test.csv` (776 rows), all with `id` as index. Submissions follow `sample.csv`, with columns `id,y`.
 - **Metric:** R², via `sklearn.metrics.r2_score(y, y_pred)`.
 - **The organizers perturbed the data.** The report must document three preprocessing steps (outlier detection, feature selection, imputation of missing values) plus a short description of the regression model.
-- **Reference point:** other teams reach about R² = 0.82. Our best single model is currently at 0.69.
+- **Reference point:** other teams reach about R² = 0.82. Our best single model is the SVR on `log_knn`: out-of-fold R² 0.708. The earlier SVR on `knn` (out-of-fold 0.694) scored 0.7178 on the public leaderboard.
 
 ## Folder layout
 
@@ -14,15 +14,17 @@
 |---|---|
 | `data_prep.ipynb` | the full preprocessing; writes the prepared CSVs below |
 | `X_train.csv`, `y_train.csv`, `X_test.csv`, `sample.csv` | original data |
-| `X_train_median.csv`, `X_test_median.csv` | prepared data, gaps filled with the median |
-| `X_train_knn.csv`, `X_test_knn.csv` | prepared data, gaps filled with kNN. **The default input for models** |
+| `X_train_knn.csv`, `X_test_knn.csv` | prepared data, gaps filled with kNN (used by XGBoost and `folds.ipynb`) |
+| `X_train_log_knn.csv`, `X_test_log_knn.csv` | the same, with the log of the 11 right-skewed features taken before the kNN fill. **The default input for new models** |
 | `plots/fs2_comparison.png` | the feature-selection validation figure (shown in `data_prep.ipynb`) |
-| `ridge_cc.ipynb`, `submission_ridge.csv` | a teammate's Ridge baseline on the raw data, in French (nested CV R² ≈ 0.39) |
-| `SVR/SVR.ipynb`, `SVR/test_svr.csv` | tuned SVR, and its test predictions |
-| `Stacking/folds.ipynb`, `Stacking/folds.csv` | the shared CV split used by every model |
-| `Stacking/oof_svr.csv` | the SVR's out-of-fold predictions |
+| `SVR/SVR.ipynb`, `SVR/submission_svr.csv` | tuned SVR on `log_knn`, and its test predictions |
+| `XGboost_ridge/Ridge_vs_XGB.ipynb` | a teammate's Ridge and XGBoost on `knn`; writes `submission_ridge_knn.csv`, `submission_xgboost_knn.csv` and `Stacking/oof_xgb.csv` |
+| `Gaussian_process/GP.ipynb` | Gaussian process (to do) |
+| `Stacking/folds.ipynb`, `Stacking/folds.csv` | the shared CV split used by every model, and the code every model pastes at its end |
+| `Stacking/oof_svr.csv`, `Stacking/oof_xgb.csv` | out-of-fold predictions of each model |
+| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and the stacked submission |
 
-**Paths:** model notebooks live in subfolders and read the data with `../X_train_knn.csv` and similar. The conda environment is `AML`.
+**Paths:** model notebooks live in subfolders and read the data with `../X_train_log_knn.csv` and similar. The conda environment is `AML`. **Don't move, rename or delete files or folders without the user's approval:** teammates work with this layout.
 
 ## Data preparation (`data_prep.ipynb`)
 
@@ -34,7 +36,8 @@
 | 2. Constant columns | found on train, dropped from both | `x104, x129, x489, x530` → 828 features |
 | 3. Outlier removal | see below | **60 training rows removed → 1152 rows**. Test rows are never removed |
 | 4. Feature selection | see below | **216 features** |
-| 5. Imputation | median and kNN, both fitted on the 1152 kept rows | two final datasets, 1152 × 216 and 776 × 216 |
+| 5. Imputation | kNN (k = 5), fitted on the 1152 kept rows | `knn`: 1152 × 216 and 776 × 216 |
+| 6. Log transform | log of the 11 right-skewed features, then the same kNN fill in log units | `log_knn`: 1152 × 216 and 776 × 216 |
 
 ### Outlier removal: logic and results
 
@@ -72,12 +75,23 @@
 
 ### Imputation: logic and results
 
-- **Median:** the medians of the 1152 kept rows, applied to train and test.
+- **Median fill:** now only a baseline, in the reconstruction test and the SVR comparison below. Its files and notebook cell were deleted.
 - **kNN reconstruction test:**
   - hide 7% of the *known* values (about the real missing rate), 3 repeats, standardized units;
   - **RMSE: median 1.011, kNN k = 5 0.645** (best; k = 7 0.646, k = 30 0.674).
 - **Final kNN fill:** `StandardScaler` → `KNNImputer(n_neighbors=5, weights="distance")`, both fitted on train, then converted back to the original units. Only the gaps change.
 - **With the tuned SVR:** median 0.658 vs **kNN 0.694**, a gain of +0.036 ± 0.004, with kNN better in all 5 folds. → **Use the kNN files.**
+
+### Log transform: logic and results
+
+- **Rule:** the log of every feature with skew > 1 on the kept training rows and strictly positive in train and test. That's 11 features: `x115, x159, x415, x458, x507, x531, x542, x641, x665, x702, x742`.
+- **Why:**
+  - these look like volumes, which change by percentages with age;
+  - the log makes them more linear in age (`x115`: r = 0.46 → 0.62; `x641`: 0.37 → 0.51);
+  - without it, their long right tails squeeze most rows together after scaling.
+- **Order:** the log comes after feature selection and before the kNN fill, so the gaps are filled in log units. The log keeps the order of the values, so the Spearman selection doesn't change. `k = 5` comes from the reconstruction test in the original units.
+- **With the SVR** (same hyperparameters, same folds): `knn` vs `log_knn`, **+0.0148 ± 0.0041 (SE), better in 5/5 folds**. After re-tuning on `log_knn`: CV 0.7074, out-of-fold 0.7083.
+- **Trees (XGBoost):** no effect expected, because a monotone transform doesn't change their splits. That's why XGBoost stays on `knn`.
 
 ## Modelling
 
@@ -85,9 +99,13 @@
 
 | Model | Data | CV R² | Notes |
 |---|---|---|---|
-| Ridge | raw, own pipeline | ≈ 0.39 (nested CV) | teammate's baseline |
+| Ridge | raw, own pipeline | ≈ 0.39 (nested CV) | teammate's first baseline (notebook since deleted) |
+| Ridge | `X_train_knn` | 0.582 | teammate's, `alpha ≈ 174` |
 | HistGradientBoosting (default) | 216 features, NaNs | 0.595 | only the judge for feature selection |
-| **SVR, RBF kernel (tuned)** | `X_train_knn` | **0.6926 ± 0.009; out-of-fold 0.6935** | `C ≈ 9.7`, `gamma ≈ 0.005` (≈ 1/216), `epsilon ≈ 0.001`. The plateau is flat for C between 7 and 45. The model is `TransformedTargetRegressor(StandardScaler → SVR)` with `y` standardized |
+| XGBoost (tuned) | `X_train_knn` | 0.678; out-of-fold 0.6787 | teammate's: `learning_rate 0.1`, `max_depth 3`, `min_child_weight 5`, `n_estimators 500`, `colsample_bytree 0.6`, `subsample 0.8`, `reg_alpha 1`, `reg_lambda 1`. Training R² 0.996. Early stopping didn't help (0.633) |
+| SVR, RBF kernel (tuned) | `X_train_knn` | 0.6926 ± 0.009; out-of-fold 0.6935 | public leaderboard 0.7178 |
+| **SVR, RBF kernel (tuned)** | `X_train_log_knn` | **0.7074 ± 0.0097; out-of-fold 0.7083** | `C ≈ 9.7`, `gamma ≈ 0.005` (≈ 1/216), `epsilon ≈ 0.001`. The plateau is flat for C between 7 and 45. The model is `TransformedTargetRegressor(StandardScaler → SVR)` with `y` standardized |
+| Stack SVR + XGBoost | out-of-fold predictions | 0.716 (simple average 0.714) | with the SVR on `knn`. Weights: SVR 0.60, XGBoost 0.47, intercept −4.9. **To re-run with the SVR on `log_knn`** |
 
 ### Tested with the SVR and rejected
 
@@ -101,11 +119,11 @@
 
 | Model | Status | Notes |
 |---|---|---|
-| SVR | ✅ done | |
-| XGBoost | in progress (Cyprien) | tune `learning_rate`, `max_depth`, `subsample`, `colsample_bytree`, `min_child_weight`, `reg_*` with a random search |
+| SVR | ✅ done | on `log_knn` |
+| XGBoost | ✅ done (Cyprien) | on `knn` |
+| Gaussian process with ARD kernel | **next** (`Gaussian_process/GP.ipynb`) | on `log_knn`. Learns a weight per feature, which suits the noise sensitivity seen with SVR |
 | MLP | to do | plain PyTorch `nn.Module` with a hand-written CV loop. Use `HuberLoss`, dropout, weight decay and early stopping. Re-check k around 216 |
 | Extra Trees | to do | adds diversity to the stack. Tune `n_estimators`, `max_features`, `min_samples_leaf` |
-| Gaussian process with ARD kernel | optional, promising | learns a weight per feature, which suits the noise sensitivity seen with SVR |
 
 **Not suitable:**
 - **CNN:** the columns have no spatial order.
@@ -115,12 +133,13 @@
 
 **Shared split:**
 - `Stacking/folds.csv` maps each training `id` to a fold from 0 to 4.
-- It was built with `KFold(n_splits=5, shuffle=True, random_state=42)` on the row order of `X_train_knn.csv`. That's the same split the SVR used.
+- It was built with `KFold(n_splits=5, shuffle=True, random_state=42)` on the row order of `X_train_knn.csv`. That's the same split the SVR used. `X_train_log_knn.csv` has the same ids in the same order.
 - Load it with `.loc[X.index, "fold"]`, so rows are matched by `id`, not by position.
 
-**What every model produces:**
+**What every model produces** (the code to paste is in `folds.ipynb`):
 1. **Out-of-fold predictions:** for each fold, train on the other 4 and predict that fold. That gives one prediction per training row (1152 rows), saved as `Stacking/oof_<model>.csv`.
-2. **Test predictions:** refit on all 1152 rows, predict the 776 test rows, and save as `<ModelFolder>/test_<model>.csv` in `sample.csv` format (`id,y`).
+2. **Test predictions:** refit on all 1152 rows, predict the 776 test rows, and save as `<ModelFolder>/submission_<model>.csv` in `sample.csv` format (`id,y`). XGBoost's file is `XGboost_ridge/submission_xgboost_knn.csv`.
+3. **One line in `MODELS`** (cell 2 of `stacking.ipynb`): the model's name and the path to its test predictions.
 
 **Every model must use:**
 - the same 1152 rows and the same `y`;
@@ -128,17 +147,19 @@
 
 The input features may differ between models.
 
-**Meta-model:** `LinearRegression(positive=True)` fitted on the out-of-fold columns, then applied to the test predictions.
-- **Keep the stack** only if its out-of-fold R² beats the best single model.
-- **If the weights come out roughly equal,** a plain average is simpler and just as good.
+**Meta-model (`stacking.ipynb`):**
+- `LinearRegression()` (free coefficients and an intercept), fitted on the out-of-fold columns, then applied to the test predictions.
+- It's scored on the shared folds against each model and the simple average.
+- It writes `Stacking/submission_stacking.csv`.
+- **Keep the stack** only if its out-of-fold R² beats the best single model. Otherwise, upload that model's `submission_<model>.csv`.
 
 ## Next steps
 
-1. **The teammate finishes XGBoost** with the shared folds and saves `oof_xgb.csv` and `test_xgb.csv`.
-2. **Train the MLP and Extra Trees** the same way, and optionally a Gaussian process with ARD.
-3. **Build the stacking notebook:** load all out-of-fold files, fit the weights, compare with the best single model, and write the submission in `sample.csv` format.
+1. **Re-run `Stacking/stacking.ipynb`.** The SVR files now come from `log_knn`, but the current `submission_stacking.csv` still uses the old SVR.
+2. **Gaussian process** on `log_knn`, with the `folds.ipynb` code at the end and one line in `MODELS`.
+3. **Optionally, the MLP and Extra Trees** the same way.
 4. **Write the report:**
-   - every step with its numbers: outliers (60 rows, precision/recall), feature selection (216 features, FS2 table and plot), imputation (RMSE 0.645 vs 1.011, R² +0.036);
+   - every step with its numbers: outliers (60 rows, precision/recall), feature selection (216 features, FS2 table and plot), imputation (RMSE 0.645 vs 1.011, R² +0.036), log transform (11 features, +0.015 with the SVR);
    - the models and the stack.
 
 ## Caveats
