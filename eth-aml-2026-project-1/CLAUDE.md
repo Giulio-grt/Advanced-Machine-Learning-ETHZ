@@ -6,7 +6,9 @@
 - **Data:** `X_train.csv` (1212 rows), `y_train.csv`, `X_test.csv` (776 rows), all with `id` as index. Submissions follow `sample.csv`, with columns `id,y`.
 - **Metric:** R², via `sklearn.metrics.r2_score(y, y_pred)`.
 - **The organizers perturbed the data.** The report must document three preprocessing steps (outlier detection, feature selection, imputation of missing values) plus a short description of the regression model.
-- **Reference point:** other teams reach about R² = 0.82. **Our best is the stack of SVR + XGBoost + GP: out-of-fold R² 0.735, public leaderboard 0.7718.** The best single model is the SVR on `log_knn` (out-of-fold 0.708). The earlier SVR on `knn` (out-of-fold 0.694) scored 0.7178 on the leaderboard.
+- **Reference point:** other teams reach about R² = 0.82. **Our best is the stack of TabPFN + GP: out-of-fold R² 0.780, public leaderboard 0.8097.** The best single model is TabPFN (out-of-fold 0.777). Earlier submissions:
+  - the stack of SVR + XGBoost + GP (out-of-fold 0.735) scored 0.7718;
+  - the SVR on `knn` (out-of-fold 0.694) scored 0.7178.
 
 ## Folder layout
 
@@ -20,10 +22,11 @@
 | `SVR/SVR.ipynb`, `SVR/submission_svr.csv` | tuned SVR on `log_knn`, and its test predictions |
 | `XGboost_ridge/Ridge_vs_XGB.ipynb` | a teammate's Ridge and XGBoost on `knn`; writes `submission_ridge_knn.csv`, `submission_xgboost_knn.csv` and `Stacking/oof_xgb.csv` |
 | `Gaussian_process/GP.ipynb`, `Gaussian_process/submission_gp.csv` | GP with an ARD kernel on `log_knn` (plain PyTorch), and its test predictions |
+| `TabPFN/TabPFN.ipynb`, `TabPFN/submission_tabpfn.csv` | TabPFN (pretrained tabular transformer) on `log_knn`, and its test predictions |
 | `ExtraTrees/ExtraTrees.ipynb` | Extra Trees on `knn` (in French); writes `Stacking/oof_extra_trees.csv` and `Stacking/test_extra_trees.csv`. Not in the stack. Its paths still assume the project root, so it doesn't run from its folder |
 | `Stacking/folds.ipynb`, `Stacking/folds.csv` | the shared CV split used by every model, and the code every model pastes at its end |
-| `Stacking/oof_<model>.csv` | out-of-fold predictions of each model (`svr`, `xgb`, `gp`, `extra_trees`) |
-| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and the stacked submission (SVR + XGBoost + GP, public leaderboard 0.7718) |
+| `Stacking/oof_<model>.csv` | out-of-fold predictions of each model (`svr`, `xgb`, `gp`, `extra_trees`, `tabpfn`) |
+| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and the stacked submission (TabPFN + GP, public leaderboard 0.8097) |
 
 **Paths:** model notebooks live in subfolders and read the data with `../X_train_log_knn.csv` and similar. The conda environment is `AML`. **Don't move, rename or delete files or folders without the user's approval:** teammates work with this layout.
 
@@ -109,7 +112,21 @@
 | Extra Trees (tuned) | `X_train_knn` | 0.644; out-of-fold 0.645 | the defaults were best (`max_features 1.0`, no depth limit, `min_samples_leaf 1`) |
 | GP, ARD RBF kernel | `X_train_log_knn` | out-of-fold 0.690 | see "Gaussian process" below |
 | Stack SVR + XGBoost (earlier) | out-of-fold predictions | 0.716 | with the SVR on `knn` |
-| **Stack SVR + XGBoost + GP** | out-of-fold predictions | **0.735** (simple average 0.735) | weights: SVR 0.37, GP 0.36, XGBoost 0.32, intercept −3.6. **Public leaderboard 0.7718** |
+| Stack SVR + XGBoost + GP | out-of-fold predictions | 0.735 (simple average 0.735) | weights: SVR 0.37, GP 0.36, XGBoost 0.32, intercept −3.6. Public leaderboard 0.7718 |
+| **TabPFN** | `X_train_log_knn` | **out-of-fold 0.777** | see "TabPFN" below. Better than the SVR in every fold by 0.05–0.08 |
+| **Stack TabPFN + GP** | out-of-fold predictions | **0.780** (simple average 0.764) | weights: TabPFN 0.88, GP 0.15, intercept −2.9. **Public leaderboard 0.8097** |
+
+### TabPFN (`TabPFN/TabPFN.ipynb`)
+
+- **What it is:** a transformer pretrained by Prior Labs on millions of synthetic tables. It isn't trained on our data. At prediction time it reads the training rows and predicts the new rows in one forward pass, so there's nothing to tune.
+- **Allowed:** a course forum answer (Johannes Schulte-Vels, 26 Oct 2026) says pretrained models may be used as the final regressor despite the "no AutoML packages" rule. It runs on our own preprocessed data (`log_knn`). Mention it in the Moodle description.
+- **Setup:**
+  - package `tabpfn==9.2.0` in the `AML` environment; it uses the default model v3.5 and runs on MPS automatically;
+  - the weights are gated, so a Prior Labs API key is stored in `~/.cache/tabpfn/auth_token`, outside the repo. **Never put the key in a notebook.**
+- **Results:**
+  - per fold 0.807, 0.797, 0.727, 0.767, 0.783; out-of-fold 0.777;
+  - about 10 s per fold on the M4 (the first run downloads 876 MB of weights);
+  - residual correlation with the SVR 0.88, XGBoost 0.83, GP 0.78.
 
 ### Gaussian process (`Gaussian_process/GP.ipynb`)
 
@@ -131,6 +148,22 @@
 
 **Conclusion:** the remaining gap to 0.82 is spread evenly over all rows (about 5 years of error each), not concentrated in a subgroup.
 
+### Tested on the stack of SVR + XGBoost + GP and rejected
+
+- **A small model fitted on the stack's errors** (out-of-fold):
+  - Ridge on the features −0.002;
+  - shallow boosting −0.022;
+  - a curve on the stack's prediction −0.002.
+
+  No feature correlates with the error above noise (max |ρ| 0.047). The age-dependent bias (young overestimated by 3.3 years, old underestimated by 3.7) is regression to the mean. Grouped by predicted age the error is about 0, so it can't be corrected without knowing the true age.
+- **More model families in the stack:** Ridge (own 0.622), a kNN regressor (0.538, k = 3–10) and additive splines (0.639) all added about 0 (weights 0.01–0.07).
+- **`PowerTransformer` (Yeo-Johnson) on all features**, in place of `StandardScaler`:
+  - SVR +0.005 (4/5 folds), GP −0.021 (5/5 folds worse);
+  - stack with the new SVR only +0.002 → not worth it.
+
+  The log of the 11 skewed features already captured the effect.
+- **Caution:** these tests showed that *these models* can't extract more from the 216 features. TabPFN then reached 0.777, so the features still had more signal. Don't conclude from them that the features are exhausted.
+
 ### Models still to train
 
 | Model | Status | Notes |
@@ -138,12 +171,13 @@
 | SVR | ✅ done | on `log_knn` |
 | XGBoost | ✅ done (Cyprien) | on `knn` |
 | Gaussian process with ARD kernel | ✅ done | on `log_knn`. In the stack |
+| TabPFN | ✅ done | on `log_knn`. In the stack; the main model |
 | Extra Trees | ✅ done | on `knn`. **Not in the stack:** its errors are too close to XGBoost's (residual correlation 0.89) |
 | MLP | optional | plain PyTorch `nn.Module` with a hand-written CV loop. Use `HuberLoss`, dropout, weight decay and early stopping. Add it to the stack only if its errors differ from the others' and the stack improves on the shared folds |
 
 **Not suitable:**
 - **CNN:** the columns have no spatial order.
-- **Transformer trained from scratch:** too little data (1152 rows).
+- **Transformer trained from scratch:** too little data (1152 rows). TabPFN is different: it's pretrained, so it isn't trained on our data.
 
 ## Stacking
 
@@ -177,27 +211,37 @@ The input features may differ between models.
 | SVR + XGBoost | 0.7209 | +0.0135, better in 5/5 folds |
 | SVR + XGBoost + GP | **0.7344** | **+0.0135 ± 0.0027, better in 5/5 folds** |
 | SVR + XGBoost + Extra Trees | 0.7214 | +0.0005 ± 0.0011, better in 3/5 folds → not used |
+| TabPFN alone | 0.7762 | +0.042 over SVR + XGBoost + GP, better in 5/5 folds |
+| **TabPFN + GP** (current submission) | **0.7790** | **+0.0028 ± 0.0006 over TabPFN alone, better in 5/5 folds** |
+| TabPFN + SVR, or TabPFN + XGBoost | about 0.776 | about 0: redundant with TabPFN |
+| TabPFN + SVR + XGBoost + GP | 0.7784 | the SVR gets a negative weight (−0.09) → not used |
 
 - **Residual correlations:**
   - SVR–XGBoost 0.84, SVR–GP 0.82, XGBoost–GP 0.72;
-  - XGBoost–Extra Trees 0.89: two tree ensembles on the same features make the same errors.
+  - XGBoost–Extra Trees 0.89: two tree ensembles on the same features make the same errors;
+  - TabPFN–GP 0.78, the lowest of TabPFN's correlations, so the GP is the only model that still adds anything.
 - **What matters for a new model is how different its errors are,** not only its own score.
-- **The weights come out almost equal,** so the stack amounts to an equal-weight average of three different kinds of models.
+- **`MODELS` now holds TabPFN + GP.** For the former stack (0.7718), set it back to SVR + XGBoost + GP.
 
 ## Next steps
 
 1. **Write the report:**
    - every step with its numbers: outliers (60 rows, precision/recall), feature selection (216 features, FS2 table and plot), imputation (RMSE 0.645 vs 1.011, R² +0.036), log transform (11 features, +0.015 with the SVR);
-   - the models: SVR, XGBoost and GP with ARD;
-   - the stack: equal-ish weights, out-of-fold 0.735, leaderboard 0.7718.
-2. **Optionally, the MLP**, following the rule in the models table.
-3. **The remaining gap to 0.82** (about 0.05 on the leaderboard) is more likely in the preprocessing than in the models: each extra model adds less.
+   - the models: SVR, XGBoost and GP with ARD, then TabPFN as the final regressor, citing the forum answer;
+   - the stack: TabPFN + GP, out-of-fold 0.780, leaderboard 0.8097; the earlier stack of three models scored 0.735 / 0.7718.
+2. **Optionally, the MLP** (a teammate), following the rule in the models table. Compare it against TabPFN + GP now, not against the old stack.
+3. **The remaining gap to 0.82 is about 0.01 on the leaderboard.** That's close to the noise of the public score, so don't spend submissions chasing it.
 
 ## Caveats
 
 - **The CV scores are slightly optimistic,** because the 216 features were selected on all 1152 rows. Measured for the SVR, the effect is about 0.008 (0.693 vs 0.685 with the selection inside the folds).
 - **Differences below about 0.01–0.02 R² are noise** (SE ≈ 0.01). Compare models fold by fold, on the same folds.
-- **Leaderboard scores sit above CV:** +0.025 for the SVR (0.694 → 0.7178) and +0.037 for the stack (0.735 → 0.7718). The offset is stable, so CV gains do carry over. Decide changes on CV, not on the leaderboard.
+- **Leaderboard scores sit above CV:**
+  - +0.025 for the SVR (0.694 → 0.7178);
+  - +0.037 for the three-model stack (0.735 → 0.7718);
+  - +0.030 for TabPFN + GP (0.780 → 0.8097).
+
+  The offset is stable, so CV gains do carry over. Decide changes on CV, not on the leaderboard.
 - **Check before writing code:**
   - which earlier cells a cell depends on, since cells get deleted;
   - the paths, since notebooks live in subfolders;
