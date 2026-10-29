@@ -6,7 +6,7 @@
 - **Data:** `X_train.csv` (1212 rows), `y_train.csv`, `X_test.csv` (776 rows), all with `id` as index. Submissions follow `sample.csv`, with columns `id,y`.
 - **Metric:** R², via `sklearn.metrics.r2_score(y, y_pred)`.
 - **The organizers perturbed the data.** The report must document three preprocessing steps (outlier detection, feature selection, imputation of missing values) plus a short description of the regression model.
-- **Reference point:** other teams reach about R² = 0.82. Our best single model is the SVR on `log_knn`: out-of-fold R² 0.708. The earlier SVR on `knn` (out-of-fold 0.694) scored 0.7178 on the public leaderboard.
+- **Reference point:** other teams reach about R² = 0.82. **Our best is the stack of SVR + XGBoost + GP: out-of-fold R² 0.735, public leaderboard 0.7718.** The best single model is the SVR on `log_knn` (out-of-fold 0.708). The earlier SVR on `knn` (out-of-fold 0.694) scored 0.7178 on the leaderboard.
 
 ## Folder layout
 
@@ -19,10 +19,11 @@
 | `plots/fs2_comparison.png` | the feature-selection validation figure (shown in `data_prep.ipynb`) |
 | `SVR/SVR.ipynb`, `SVR/submission_svr.csv` | tuned SVR on `log_knn`, and its test predictions |
 | `XGboost_ridge/Ridge_vs_XGB.ipynb` | a teammate's Ridge and XGBoost on `knn`; writes `submission_ridge_knn.csv`, `submission_xgboost_knn.csv` and `Stacking/oof_xgb.csv` |
-| `Gaussian_process/GP.ipynb` | Gaussian process (to do) |
+| `Gaussian_process/GP.ipynb`, `Gaussian_process/submission_gp.csv` | GP with an ARD kernel on `log_knn` (plain PyTorch), and its test predictions |
+| `ExtraTrees/ExtraTrees.ipynb` | Extra Trees on `knn` (in French); writes `Stacking/oof_extra_trees.csv` and `Stacking/test_extra_trees.csv`. Not in the stack. Its paths still assume the project root, so it doesn't run from its folder |
 | `Stacking/folds.ipynb`, `Stacking/folds.csv` | the shared CV split used by every model, and the code every model pastes at its end |
-| `Stacking/oof_svr.csv`, `Stacking/oof_xgb.csv` | out-of-fold predictions of each model |
-| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and the stacked submission |
+| `Stacking/oof_<model>.csv` | out-of-fold predictions of each model (`svr`, `xgb`, `gp`, `extra_trees`) |
+| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and the stacked submission (SVR + XGBoost + GP, public leaderboard 0.7718) |
 
 **Paths:** model notebooks live in subfolders and read the data with `../X_train_log_knn.csv` and similar. The conda environment is `AML`. **Don't move, rename or delete files or folders without the user's approval:** teammates work with this layout.
 
@@ -105,7 +106,22 @@
 | XGBoost (tuned) | `X_train_knn` | 0.678; out-of-fold 0.6787 | teammate's: `learning_rate 0.1`, `max_depth 3`, `min_child_weight 5`, `n_estimators 500`, `colsample_bytree 0.6`, `subsample 0.8`, `reg_alpha 1`, `reg_lambda 1`. Training R² 0.996. Early stopping didn't help (0.633) |
 | SVR, RBF kernel (tuned) | `X_train_knn` | 0.6926 ± 0.009; out-of-fold 0.6935 | public leaderboard 0.7178 |
 | **SVR, RBF kernel (tuned)** | `X_train_log_knn` | **0.7074 ± 0.0097; out-of-fold 0.7083** | `C ≈ 9.7`, `gamma ≈ 0.005` (≈ 1/216), `epsilon ≈ 0.001`. The plateau is flat for C between 7 and 45. The model is `TransformedTargetRegressor(StandardScaler → SVR)` with `y` standardized |
-| Stack SVR + XGBoost | out-of-fold predictions | 0.716 (simple average 0.714) | with the SVR on `knn`. Weights: SVR 0.60, XGBoost 0.47, intercept −4.9. **To re-run with the SVR on `log_knn`** |
+| Extra Trees (tuned) | `X_train_knn` | 0.644; out-of-fold 0.645 | the defaults were best (`max_features 1.0`, no depth limit, `min_samples_leaf 1`) |
+| GP, ARD RBF kernel | `X_train_log_knn` | out-of-fold 0.690 | see "Gaussian process" below |
+| Stack SVR + XGBoost (earlier) | out-of-fold predictions | 0.716 | with the SVR on `knn` |
+| **Stack SVR + XGBoost + GP** | out-of-fold predictions | **0.735** (simple average 0.735) | weights: SVR 0.37, GP 0.36, XGBoost 0.32, intercept −3.6. **Public leaderboard 0.7718** |
+
+### Gaussian process (`Gaussian_process/GP.ipynb`)
+
+- **Model:** an exact GP in plain PyTorch, using float64 on the CPU. sklearn's GP would build a 1152 × 1152 × 216 gradient array at every optimizer step, which is too slow for 16 GB.
+- **Kernel:** ARD RBF kernel: one length scale per feature, plus signal and noise variance. X and y are standardized.
+- **Fitting:** the hyperparameters maximize the marginal likelihood (Adam, `lr 0.05`, 600 steps, converged). They start from the SVR's width (ℓ = 10 for every feature) and are refitted inside each fold.
+- **Results:**
+  - out-of-fold R² 0.690, against 0.708 for the SVR. It's better in fold 0 and worse in folds 2–4;
+  - 300 steps gave the same results;
+  - it practically ignores 124 of the 216 features (ℓ > 100);
+  - its most-used features include the log-transformed `x641`, `x115`, `x458` and `x531`.
+- **Why it's in the stack:** its errors differ most from the others'. Residual correlation: 0.82 with the SVR and 0.72 with XGBoost.
 
 ### Tested with the SVR and rejected
 
@@ -121,9 +137,9 @@
 |---|---|---|
 | SVR | ✅ done | on `log_knn` |
 | XGBoost | ✅ done (Cyprien) | on `knn` |
-| Gaussian process with ARD kernel | **next** (`Gaussian_process/GP.ipynb`) | on `log_knn`. Learns a weight per feature, which suits the noise sensitivity seen with SVR |
-| MLP | to do | plain PyTorch `nn.Module` with a hand-written CV loop. Use `HuberLoss`, dropout, weight decay and early stopping. Re-check k around 216 |
-| Extra Trees | to do | adds diversity to the stack. Tune `n_estimators`, `max_features`, `min_samples_leaf` |
+| Gaussian process with ARD kernel | ✅ done | on `log_knn`. In the stack |
+| Extra Trees | ✅ done | on `knn`. **Not in the stack:** its errors are too close to XGBoost's (residual correlation 0.89) |
+| MLP | optional | plain PyTorch `nn.Module` with a hand-written CV loop. Use `HuberLoss`, dropout, weight decay and early stopping. Add it to the stack only if its errors differ from the others' and the stack improves on the shared folds |
 
 **Not suitable:**
 - **CNN:** the columns have no spatial order.
@@ -153,19 +169,35 @@ The input features may differ between models.
 - It writes `Stacking/submission_stacking.csv`.
 - **Keep the stack** only if its out-of-fold R² beats the best single model. Otherwise, upload that model's `submission_<model>.csv`.
 
+**What each model adds** (stack refitted inside each shared fold, mean R² over the 5 folds):
+
+| Stack | Mean R² | Gain from the added model |
+|---|---|---|
+| SVR alone | 0.7074 | |
+| SVR + XGBoost | 0.7209 | +0.0135, better in 5/5 folds |
+| SVR + XGBoost + GP | **0.7344** | **+0.0135 ± 0.0027, better in 5/5 folds** |
+| SVR + XGBoost + Extra Trees | 0.7214 | +0.0005 ± 0.0011, better in 3/5 folds → not used |
+
+- **Residual correlations:**
+  - SVR–XGBoost 0.84, SVR–GP 0.82, XGBoost–GP 0.72;
+  - XGBoost–Extra Trees 0.89: two tree ensembles on the same features make the same errors.
+- **What matters for a new model is how different its errors are,** not only its own score.
+- **The weights come out almost equal,** so the stack amounts to an equal-weight average of three different kinds of models.
+
 ## Next steps
 
-1. **Re-run `Stacking/stacking.ipynb`.** The SVR files now come from `log_knn`, but the current `submission_stacking.csv` still uses the old SVR.
-2. **Gaussian process** on `log_knn`, with the `folds.ipynb` code at the end and one line in `MODELS`.
-3. **Optionally, the MLP and Extra Trees** the same way.
-4. **Write the report:**
+1. **Write the report:**
    - every step with its numbers: outliers (60 rows, precision/recall), feature selection (216 features, FS2 table and plot), imputation (RMSE 0.645 vs 1.011, R² +0.036), log transform (11 features, +0.015 with the SVR);
-   - the models and the stack.
+   - the models: SVR, XGBoost and GP with ARD;
+   - the stack: equal-ish weights, out-of-fold 0.735, leaderboard 0.7718.
+2. **Optionally, the MLP**, following the rule in the models table.
+3. **The remaining gap to 0.82** (about 0.05 on the leaderboard) is more likely in the preprocessing than in the models: each extra model adds less.
 
 ## Caveats
 
 - **The CV scores are slightly optimistic,** because the 216 features were selected on all 1152 rows. Measured for the SVR, the effect is about 0.008 (0.693 vs 0.685 with the selection inside the folds).
 - **Differences below about 0.01–0.02 R² are noise** (SE ≈ 0.01). Compare models fold by fold, on the same folds.
+- **Leaderboard scores sit above CV:** +0.025 for the SVR (0.694 → 0.7178) and +0.037 for the stack (0.735 → 0.7718). The offset is stable, so CV gains do carry over. Decide changes on CV, not on the leaderboard.
 - **Check before writing code:**
   - which earlier cells a cell depends on, since cells get deleted;
   - the paths, since notebooks live in subfolders;
