@@ -6,7 +6,8 @@
 - **Data:** `X_train.csv` (1212 rows), `y_train.csv`, `X_test.csv` (776 rows), all with `id` as index. Submissions follow `sample.csv`, with columns `id,y`.
 - **Metric:** R², via `sklearn.metrics.r2_score(y, y_pred)`.
 - **The organizers perturbed the data.** The report must document three preprocessing steps (outlier detection, feature selection, imputation of missing values) plus a short description of the regression model.
-- **Reference point:** other teams reach about R² = 0.82. **Our best is the stack of TabPFN + GP: out-of-fold R² 0.780, public leaderboard 0.8097.** The best single model is TabPFN (out-of-fold 0.777). Earlier submissions:
+- **Where we stand:** **our submission is LimiX-2 alone: out-of-fold R² 0.809, public leaderboard ≈ 0.845, 4th place.** The top team scores about 0.87. We decided not to chase that 0.025 gap (see "LimiX-2" below). Earlier submissions:
+  - the stack of TabPFN + GP (out-of-fold 0.780) scored 0.8097;
   - the stack of SVR + XGBoost + GP (out-of-fold 0.735) scored 0.7718;
   - the SVR on `knn` (out-of-fold 0.694) scored 0.7178.
 
@@ -21,12 +22,18 @@
 | `plots/fs2_comparison.png` | the feature-selection validation figure (shown in `data_prep.ipynb`) |
 | `SVR/SVR.ipynb`, `SVR/submission_svr.csv` | tuned SVR on `log_knn`, and its test predictions |
 | `XGboost_ridge/Ridge_vs_XGB.ipynb` | a teammate's Ridge and XGBoost on `knn`; writes `submission_ridge_knn.csv`, `submission_xgboost_knn.csv` and `Stacking/oof_xgb.csv` |
+| `XGboost_ridge/XGB_opti.ipynb` | Cyprien's second XGBoost search (in French); it didn't beat the first one |
 | `Gaussian_process/GP.ipynb`, `Gaussian_process/submission_gp.csv` | GP with an ARD kernel on `log_knn` (plain PyTorch), and its test predictions |
 | `TabPFN/TabPFN.ipynb`, `TabPFN/submission_tabpfn.csv` | TabPFN (pretrained tabular transformer) on `log_knn`, and its test predictions |
+| `TabPFN/TabPFN_finetune_colab.ipynb`, `TabPFN/submission_tabpfn_ft.csv` | TabPFN fine-tuned inside each fold on Colab (T4 GPU), and its test predictions |
+| `TabPFN/TabPFN_variants.ipynb`, `TabPFN/TabPFN_tuning_colab.ipynb` | Luca's and Cyprien's TabPFN variants and tuning (see "TabPFN" below). Their output files were written on Colab, not to the repo |
+| `LimiX/LimiX.ipynb`, `LimiX/submission_limix.csv` | **LimiX-2** (pretrained tabular transformer) on `log_knn`, and its test predictions. **The current submission** |
+| `TabICL/TabICL.ipynb` | Cyprien's TabICLv2 (pretrained, in French); out-of-fold 0.767. Its output files were written on Colab, not to the repo |
+| `MLP_Luca_clean.ipynb`, `MLP_Luca_notclean.ipynb`, `MLP/submission_mlp.csv` | Luca's plain-PyTorch MLP on `log_knn` (clean version and exploration), and its test predictions |
 | `ExtraTrees/ExtraTrees.ipynb` | Extra Trees on `knn` (in French); writes `Stacking/oof_extra_trees.csv` and `Stacking/test_extra_trees.csv`. Not in the stack. Its paths still assume the project root, so it doesn't run from its folder |
 | `Stacking/folds.ipynb`, `Stacking/folds.csv` | the shared CV split used by every model, and the code every model pastes at its end |
-| `Stacking/oof_<model>.csv` | out-of-fold predictions of each model (`svr`, `xgb`, `gp`, `extra_trees`, `tabpfn`) |
-| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and the stacked submission (TabPFN + GP, public leaderboard 0.8097) |
+| `Stacking/oof_<model>.csv` | out-of-fold predictions of each model (`svr`, `xgb`, `gp`, `extra_trees`, `tabpfn`, `tabpfn_ft`, `mlp`, `lasso`, `limix`) |
+| `Stacking/stacking.ipynb`, `Stacking/submission_stacking.csv` | the meta-model (in French), and its stacked predictions (now TabPFN-ft + GP). No longer the submission |
 
 **Paths:** model notebooks live in subfolders and read the data with `../X_train_log_knn.csv` and similar. The conda environment is `AML`. **Don't move, rename or delete files or folders without the user's approval:** teammates work with this layout.
 
@@ -113,8 +120,13 @@
 | GP, ARD RBF kernel | `X_train_log_knn` | out-of-fold 0.690 | see "Gaussian process" below |
 | Stack SVR + XGBoost (earlier) | out-of-fold predictions | 0.716 | with the SVR on `knn` |
 | Stack SVR + XGBoost + GP | out-of-fold predictions | 0.735 (simple average 0.735) | weights: SVR 0.37, GP 0.36, XGBoost 0.32, intercept −3.6. Public leaderboard 0.7718 |
-| **TabPFN** | `X_train_log_knn` | **out-of-fold 0.777** | see "TabPFN" below. Better than the SVR in every fold by 0.05–0.08 |
-| **Stack TabPFN + GP** | out-of-fold predictions | **0.780** (simple average 0.764) | weights: TabPFN 0.88, GP 0.15, intercept −2.9. **Public leaderboard 0.8097** |
+| MLP (1 hidden layer of 64) | `X_train_log_knn` | out-of-fold 0.686 | Luca's. Stack TabPFN + GP + MLP 0.7798 vs 0.7800 → not used |
+| TabPFN | `X_train_log_knn` | out-of-fold 0.777 | see "TabPFN" below. Better than the SVR in every fold by 0.05–0.08 |
+| Stack TabPFN + GP | out-of-fold predictions | 0.780 (simple average 0.764) | weights: TabPFN 0.88, GP 0.15, intercept −2.9. Public leaderboard 0.8097 |
+| TabICLv2 | `X_train_log_knn` | out-of-fold 0.767 | Cyprien's, pretrained |
+| TabPFN fine-tuned | `X_train_log_knn` | out-of-fold 0.781 | +0.004 over TabPFN |
+| Stack TabPFN-ft + GP | out-of-fold predictions | 0.783 | weights: TabPFN-ft 0.85, GP 0.16 |
+| **LimiX-2** | `X_train_log_knn` | **out-of-fold 0.809** | default settings, no tuning; see "LimiX-2" below. **Public leaderboard ≈ 0.845, the current submission** |
 
 ### TabPFN (`TabPFN/TabPFN.ipynb`)
 
@@ -127,6 +139,35 @@
   - per fold 0.807, 0.797, 0.727, 0.767, 0.783; out-of-fold 0.777;
   - about 10 s per fold on the M4 (the first run downloads 876 MB of weights);
   - residual correlation with the SVR 0.88, XGBoost 0.83, GP 0.78.
+- **Fine-tuned** (`TabPFN_finetune_colab.ipynb`, Colab T4; fine-tuned inside each fold, 10% of the training part held out for early stopping): out-of-fold 0.781, +0.004.
+- **Variants and tuning** (Luca's `TabPFN_variants.ipynb`, Cyprien's `TabPFN_tuning_colab.ipynb`): NaNs left in instead of the kNN fill, 300 or all 828 features, seed averaging, 16 or 32 ensemble members, softmax temperature, aggregation. **Each changes TabPFN or the TabPFN + GP stack by 0.004 or less.** All 828 features is worse (0.767 alone).
+
+### LimiX-2 (`LimiX/LimiX.ipynb`)
+
+- **What it is:** a transformer pretrained by Stable AI on synthetic tables (400M parameters, released 16 Sept 2026). Like TabPFN, it isn't trained on our data: it reads the training rows as context and predicts the new rows in one forward pass.
+- **Settings:** the default regression config `reg_default_noretrieval_v2.json`, no tuning. It averages 8 internal views of the data (quantile or power transforms of the features, feature order shuffled).
+- **Allowed:** the same forum answer as for TabPFN.
+- **Setup:**
+  - it can't be loaded with `transformers`. The official code is `LimiXPredictor` from the LimiX repo, installed in `AML` with `pip install "git+https://github.com/limix-ldm-ai/LimiX.git@b4d06eadca6f0cd58ae259034b02c86f4a905950"` (pinned commit). It adds `kditransform`, `numba`, `llvmlite` and `nvtx`, and leaves `torch` unchanged;
+  - it installs generic top-level packages (`model`, `utils`, `config`, `inference`), so don't create local modules with these names;
+  - the weights (`LimiX-2.ckpt`, 1.63 GB) come from Hugging Face `stable-ai/LimiX-2`, cached in `~/.cache/huggingface`. They're not gated. Non-commercial license;
+  - officially CUDA or CPU only. Its model code imports Triton, which has no macOS version, but uses it only on CUDA: its RMSNorm layers fall back to `F.rms_norm` elsewhere. So the notebook imports `model.v2_0` once with a placeholder `triton` module, then runs on MPS.
+- **Speed and memory on the M4 (16 GB):**
+  - about 110 s per fold;
+  - the final prediction (1152 training + 776 test rows in one pass) needs about 13 GB, swaps, and took about 23 minutes. Close other kernels first;
+  - untested option if it's too slow: `test_batch_mode="fixed", test_batch_size=250` in `LimiXPredictor`, which predicts the test rows in chunks (each chunk still sees all training rows).
+- **Results:**
+  - per fold 0.835, 0.827, 0.767, 0.806, 0.807; out-of-fold 0.809;
+  - **+0.032 ± 0.003 over TabPFN and +0.029 ± 0.004 over the fine-tuned TabPFN, better in 5/5 folds**;
+  - residual correlation with TabPFN 0.91, the fine-tuned TabPFN 0.92, GP 0.74;
+  - public leaderboard ≈ 0.845 (+0.036 over CV), 4th place.
+- **Stacking adds nothing** (see the stacking table): every stack with GP and/or TabPFN is within ±0.001 of LimiX alone. **Submitted alone.**
+- **Fine-tuning rejected:**
+  - the LimiX repo has no training code, so the loop would have to be written from scratch;
+  - training 400M parameters needs an A100, not a T4;
+  - fine-tuning TabPFN gained only +0.004;
+  - the gap to first place (0.87) is 0.025.
+- **Short Moodle description drafted:** "Outliers removed by kNN distance to the test set, features selected by Spearman correlation, kNN imputation, then the pretrained LimiX-2 model (CV R² 0.809)."
 
 ### Gaussian process (`Gaussian_process/GP.ipynb`)
 
@@ -162,22 +203,24 @@
   - stack with the new SVR only +0.002 → not worth it.
 
   The log of the 11 skewed features already captured the effect.
-- **Caution:** these tests showed that *these models* can't extract more from the 216 features. TabPFN then reached 0.777, so the features still had more signal. Don't conclude from them that the features are exhausted.
+- **Caution:** these tests showed that *these models* can't extract more from the 216 features. TabPFN then reached 0.777 and LimiX-2 0.809, so the features still had more signal. Don't conclude from them that the features are exhausted.
 
-### Models still to train
+### Models
 
 | Model | Status | Notes |
 |---|---|---|
 | SVR | ✅ done | on `log_knn` |
 | XGBoost | ✅ done (Cyprien) | on `knn` |
-| Gaussian process with ARD kernel | ✅ done | on `log_knn`. In the stack |
-| TabPFN | ✅ done | on `log_knn`. In the stack; the main model |
+| Gaussian process with ARD kernel | ✅ done | on `log_knn`. Adds about 0 to LimiX-2 |
+| TabPFN, plain and fine-tuned | ✅ done | on `log_knn`. Replaced by LimiX-2 |
 | Extra Trees | ✅ done | on `knn`. **Not in the stack:** its errors are too close to XGBoost's (residual correlation 0.89) |
-| MLP | optional | plain PyTorch `nn.Module` with a hand-written CV loop. Use `HuberLoss`, dropout, weight decay and early stopping. Add it to the stack only if its errors differ from the others' and the stack improves on the shared folds |
+| MLP | ✅ done (Luca) | on `log_knn`, out-of-fold 0.686. Not in the stack: it added nothing to TabPFN + GP |
+| TabICLv2 | ✅ done (Cyprien) | out-of-fold 0.767 |
+| **LimiX-2** | ✅ done | on `log_knn`. **The final model, submitted alone** |
 
 **Not suitable:**
 - **CNN:** the columns have no spatial order.
-- **Transformer trained from scratch:** too little data (1152 rows). TabPFN is different: it's pretrained, so it isn't trained on our data.
+- **Transformer trained from scratch:** too little data (1152 rows). TabPFN and LimiX-2 are different: they're pretrained, so they aren't trained on our data.
 
 ## Stacking
 
@@ -212,25 +255,30 @@ The input features may differ between models.
 | SVR + XGBoost + GP | **0.7344** | **+0.0135 ± 0.0027, better in 5/5 folds** |
 | SVR + XGBoost + Extra Trees | 0.7214 | +0.0005 ± 0.0011, better in 3/5 folds → not used |
 | TabPFN alone | 0.7762 | +0.042 over SVR + XGBoost + GP, better in 5/5 folds |
-| **TabPFN + GP** (current submission) | **0.7790** | **+0.0028 ± 0.0006 over TabPFN alone, better in 5/5 folds** |
+| TabPFN + GP (former submission) | 0.7790 | +0.0028 ± 0.0006 over TabPFN alone, better in 5/5 folds |
 | TabPFN + SVR, or TabPFN + XGBoost | about 0.776 | about 0: redundant with TabPFN |
 | TabPFN + SVR + XGBoost + GP | 0.7784 | the SVR gets a negative weight (−0.09) → not used |
+| TabPFN-ft + GP | 0.7818 | |
+| **LimiX-2 alone** (current submission) | **0.8079** | **+0.026 ± 0.004 over TabPFN-ft + GP, better in 5/5 folds** |
+| LimiX-2 + GP | 0.8085 | +0.0007 ± 0.0004, better in 3/5 folds → not used |
+| LimiX-2 + TabPFN, or + TabPFN-ft | 0.8078 | about 0 → not used |
+| LimiX-2 + GP + TabPFN, or + TabPFN-ft | 0.8083–0.8084 | +0.0005 ± 0.0005, better in 2/5 folds; TabPFN's weight 0.02 → not used |
 
 - **Residual correlations:**
   - SVR–XGBoost 0.84, SVR–GP 0.82, XGBoost–GP 0.72;
   - XGBoost–Extra Trees 0.89: two tree ensembles on the same features make the same errors;
-  - TabPFN–GP 0.78, the lowest of TabPFN's correlations, so the GP is the only model that still adds anything.
+  - TabPFN–GP 0.78, the lowest of TabPFN's correlations, so the GP was the only model that still added anything to TabPFN;
+  - LimiX-2–TabPFN 0.91, LimiX-2–TabPFN-ft 0.92, LimiX-2–GP 0.74, TabPFN–TabPFN-ft 0.99.
 - **What matters for a new model is how different its errors are,** not only its own score.
-- **`MODELS` now holds TabPFN + GP.** For the former stack (0.7718), set it back to SVR + XGBoost + GP.
+- **`MODELS` now holds TabPFN-ft + GP,** with Luca's MLP line commented out. The submission is no longer the stack: it's `LimiX/submission_limix.csv`.
 
 ## Next steps
 
 1. **Write the report:**
    - every step with its numbers: outliers (60 rows, precision/recall), feature selection (216 features, FS2 table and plot), imputation (RMSE 0.645 vs 1.011, R² +0.036), log transform (11 features, +0.015 with the SVR);
-   - the models: SVR, XGBoost and GP with ARD, then TabPFN as the final regressor, citing the forum answer;
-   - the stack: TabPFN + GP, out-of-fold 0.780, leaderboard 0.8097; the earlier stack of three models scored 0.735 / 0.7718.
-2. **Optionally, the MLP** (a teammate), following the rule in the models table. Compare it against TabPFN + GP now, not against the old stack.
-3. **The remaining gap to 0.82 is about 0.01 on the leaderboard.** That's close to the noise of the public score, so don't spend submissions chasing it.
+   - the path through the models: SVR, XGBoost and GP with ARD (stack 0.735 / 0.7718), then TabPFN + GP (0.780 / 0.8097);
+   - the final regressor: LimiX-2 alone, out-of-fold 0.809, leaderboard ≈ 0.845, citing the forum answer on pretrained models; stacking it added nothing.
+2. **No more leaderboard chasing:** first place (0.87) is 0.025 ahead, and no tweak we measured gains more than about 0.004.
 
 ## Caveats
 
@@ -239,9 +287,11 @@ The input features may differ between models.
 - **Leaderboard scores sit above CV:**
   - +0.025 for the SVR (0.694 → 0.7178);
   - +0.037 for the three-model stack (0.735 → 0.7718);
-  - +0.030 for TabPFN + GP (0.780 → 0.8097).
+  - +0.030 for TabPFN + GP (0.780 → 0.8097);
+  - +0.036 for LimiX-2 (0.809 → ≈ 0.845).
 
   The offset is stable, so CV gains do carry over. Decide changes on CV, not on the leaderboard.
+- **Git:** several people edit `Stacking/stacking.ipynb` and `Stacking/submission_stacking.csv`. Pull before editing them. A pull on 6 Nov stopped on a conflict in these two files and had to be resolved by hand.
 - **Check before writing code:**
   - which earlier cells a cell depends on, since cells get deleted;
   - the paths, since notebooks live in subfolders;
